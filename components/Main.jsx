@@ -11,9 +11,10 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import parse from "html-react-parser";
-import { jsPDF } from "jspdf";
-import { saveAs } from "file-saver";
 import ChatWidget from "./Chatbot";
+
+const jsPDF = () => import("jspdf").then((module) => module.jsPDF);
+const saveAs = () => import("file-saver").then((module) => module.saveAs);
 
 const SearchContent = () => {
   const [inputValue, setInputValue] = useState("");
@@ -22,71 +23,147 @@ const SearchContent = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("summary");
   const [displayContent, setDisplayContent] = useState(null);
-  const [isCopied, setIsCopied] = useState(false);
   const [showButtons, setShowButtons] = useState(false);
+  const [error, setError] = useState(null); // Add error state
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [fileName, setFileName] = useState("");
   const [downloadType, setDownloadType] = useState("");
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
-  const handleInputChange = useCallback((event) => {
-    setInputValue(event.target.value);
-  }, []);
-
-  const handlePasteClick = useCallback(async () => {
-    try {
-      const clipboardData = await navigator.clipboard.readText();
-      setInputValue(clipboardData);
-    } catch (error) {
-      console.error("Error pasting from clipboard:", error);
-    }
-  }, []);
+  const [isCopied, setIsCopied] = useState(false);
 
   const handleSummarizeClick = useCallback(async () => {
+    if (!inputValue) {
+      setError("Please enter a YouTube URL");
+      return;
+    }
+
     setIsLoading(true);
     setDisplayContent(null);
     setFetchedData("");
-    setActiveTab("summary");
+    setError(null);
+
     try {
+      // Create the summary URL
+      const summaryUrl = `/summary/?code=${encodeURIComponent(
+        inputValue
+      )}&count=300`;
+
+      // Make the request to our proxy
       const response = await fetch(
-        `http://localhost:8000/summary/?code=${inputValue}&count=300`
+        `/api/proxy?url=${encodeURIComponent(summaryUrl)}`
       );
+
+      // Debug log
+      // console.log("Response status:", response.status);
+
       if (!response.ok) {
-        throw new Error("Network response was not ok.");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          errorData.error || `HTTP error! status: ${response.status}`
+        );
       }
+
       const data = await response.json();
-      setFetchedData(data.message);
-      setShowButtons(true);
+
+      if (data.message) {
+        setFetchedData(data.message);
+        setShowButtons(true);
+      } else {
+        throw new Error("Invalid response format");
+      }
     } catch (error) {
-      console.error("There was a problem with the fetch operation:", error);
-      setFetchedData("Failed to load summary.");
+      console.error("Error fetching summary:", error);
+      setError(error.message || "Failed to load summary. Please try again.");
+      setFetchedData("");
     } finally {
       setIsLoading(false);
     }
   }, [inputValue]);
 
   const handleQuestionsClick = useCallback(async () => {
+    if (!inputValue) {
+      setError("Please enter a YouTube URL");
+      return;
+    }
+
     setIsLoading(true);
     setDisplayContent(null);
     setFetchedQuestions("");
-    setActiveTab("qa");
+    setError(null);
+
     try {
+      // Create the questions URL
+      const questionsUrl = `/question/?code=${encodeURIComponent(
+        inputValue
+      )}&q=10`;
+
+      // Make the request to our proxy
       const response = await fetch(
-        `http://localhost:8000/question/?code=${inputValue}&q=10`
+        `/api/proxy?url=${encodeURIComponent(questionsUrl)}`
       );
+
       if (!response.ok) {
-        throw new Error("Network response was not ok");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          errorData.error || `HTTP error! status: ${response.status}`
+        );
       }
+
       const data = await response.json();
-      setFetchedQuestions(data.message);
-      setShowButtons(true);
+
+      if (data.message) {
+        setFetchedQuestions(data.message);
+        setShowButtons(true);
+      } else {
+        throw new Error("Invalid response format");
+      }
     } catch (error) {
-      console.error("There was a problem with the fetch operation:", error);
-      setFetchedQuestions("Failed to load questions.");
+      console.error("Error fetching questions:", error);
+      setError(error.message || "Failed to load questions. Please try again.");
+      setFetchedQuestions("");
     } finally {
       setIsLoading(false);
     }
   }, [inputValue]);
 
+  React.useEffect(() => {
+    if (isLoading) {
+      setDisplayContent(
+        <div className="flex items-center justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-rose-500"></div>
+        </div>
+      );
+    } else {
+      switch (activeTab) {
+        case "summary":
+          setDisplayContent(
+            error ? (
+              <p className="text-rose-400">{error}</p>
+            ) : (
+              formatOutput(fetchedData) || (
+                <p>Paste a YouTube URL and click 'Summarize' to get started.</p>
+              )
+            )
+          );
+          break;
+        case "qa":
+          setDisplayContent(
+            error ? (
+              <p className="text-rose-400">{error}</p>
+            ) : (
+              formatOutput(fetchedQuestions) || (
+                <p>
+                  Paste a YouTube URL and click 'Q&A' to generate questions.
+                </p>
+              )
+            )
+          );
+          break;
+        default:
+          setDisplayContent(null);
+      }
+    }
+  }, [activeTab, fetchedData, fetchedQuestions, isLoading, error]);
   const formatOutput = (content) => {
     if (!content) return null;
 
@@ -142,7 +219,16 @@ const SearchContent = () => {
       },
     });
   };
-
+  const handlePasteClick = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      setInputValue(text);
+      setError(null); // Clear any existing errors
+    } catch (err) {
+      console.error("Failed to read clipboard contents: ", err);
+      setError("Failed to paste from clipboard. Please try again.");
+    }
+  }, []);
   const copyToClipboard = useCallback(() => {
     const content = document.querySelector(".output-content").innerText;
     navigator.clipboard
@@ -153,6 +239,7 @@ const SearchContent = () => {
       })
       .catch((err) => {
         console.error("Failed to copy: ", err);
+        setError("Failed to copy to clipboard. Please try again.");
       });
   }, []);
 
@@ -162,46 +249,28 @@ const SearchContent = () => {
     setShowDownloadOptions(false);
   }, []);
 
-  const performDownload = useCallback(() => {
+  const performDownload = useCallback(async () => {
     const content = document.querySelector(".output-content").innerText;
-    if (downloadType === "pdf") {
-      const pdf = new jsPDF();
-      pdf.text(content, 10, 10);
-      pdf.save(`${fileName || "output"}.pdf`);
-    } else if (downloadType === "docx") {
-      const blob = new Blob([content], {
-        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      });
-      saveAs(blob, `${fileName || "output"}.docx`);
+    try {
+      if (downloadType === "pdf") {
+        const { jsPDF } = await jsPDF();
+        const pdf = new jsPDF();
+        pdf.text(content, 10, 10);
+        pdf.save(`${fileName || "output"}.pdf`);
+      } else if (downloadType === "docx") {
+        const { saveAs } = await saveAs();
+        const blob = new Blob([content], {
+          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+        saveAs(blob, `${fileName || "output"}.docx`);
+      }
+    } catch (error) {
+      console.error("Error during download:", error);
+      // You might want to set an error state here to display to the user
     }
     setShowDownloadModal(false);
     setFileName("");
   }, [fileName, downloadType]);
-
-  React.useEffect(() => {
-    if (isLoading) {
-      setDisplayContent(<p>Loading...</p>);
-    } else {
-      switch (activeTab) {
-        case "summary":
-          setDisplayContent(
-            formatOutput(fetchedData) || (
-              <p>Paste a YouTube URL and click 'Summarize' to get started.</p>
-            )
-          );
-          break;
-        case "qa":
-          setDisplayContent(
-            formatOutput(fetchedQuestions) || (
-              <p>Paste a YouTube URL and click 'Q&A' to generate questions.</p>
-            )
-          );
-          break;
-        default:
-          setDisplayContent(null);
-      }
-    }
-  }, [activeTab, fetchedData, fetchedQuestions, isLoading]);
 
   return (
     <section className="w-full min-h-screen bg-black text-rose-50 py-12 px-4">
@@ -219,13 +288,17 @@ const SearchContent = () => {
               placeholder="Paste YouTube URL"
               className="w-full pr-10 bg-rose-950/50 text-rose-100 placeholder-rose-400 border border-rose-800 rounded-lg py-2 px-4 focus:outline-none focus:border-rose-700 focus:ring focus:ring-rose-700/50"
               value={inputValue}
-              onChange={handleInputChange}
+              onChange={(e) => {
+                setInputValue(e.target.value);
+                setError(null); // Clear error when input changes
+              }}
             />
             <button
               className="absolute right-2 top-1/2 transform -translate-y-1/2 text-rose-400 hover:text-rose-200 hover:bg-rose-900/50 rounded-full p-1"
               onClick={() => {
                 if (inputValue) {
                   setInputValue("");
+                  setError(null); // Clear error when clearing input
                 } else {
                   handlePasteClick();
                 }
@@ -234,12 +307,20 @@ const SearchContent = () => {
               {inputValue ? <X size={20} /> : <Clipboard size={20} />}
             </button>
           </div>
+          {error && (
+            <div className="w-full max-w-md p-3 bg-rose-900/50 border border-rose-700 rounded-lg text-rose-100">
+              {error}
+            </div>
+          )}
           <button
             onClick={handleSummarizeClick}
-            className="w-full max-w-md bg-rose-900 hover:bg-rose-800 text-rose-100 font-semibold py-2 rounded-lg flex items-center justify-center space-x-2"
+            disabled={isLoading}
+            className={`w-full max-w-md bg-rose-900 hover:bg-rose-800 text-rose-100 font-semibold py-2 rounded-lg flex items-center justify-center space-x-2 ${
+              isLoading ? "opacity-50 cursor-not-allowed" : ""
+            }`}
           >
             <FileText size={20} />
-            <span>Summarize</span>
+            <span>{isLoading ? "Processing..." : "Summarize"}</span>
           </button>
         </div>
         <div className="mt-12">
@@ -277,7 +358,7 @@ const SearchContent = () => {
                   title="Copy to clipboard"
                 >
                   {isCopied ? (
-                    <span className="text-green-500 font-medium">Copied!</span>
+                    <span className="text-white font-medium">Copied!</span>
                   ) : (
                     <Copy
                       size={20}
@@ -332,7 +413,6 @@ const SearchContent = () => {
             <div className="flex justify-end space-x-2">
               <button
                 onClick={() => setShowDownloadModal(false)}
-                className="px-4 py-2 bg-rose-800 text-rose-100 rounded-md hover:bg-rose-700"
               >
                 Cancel
               </button>

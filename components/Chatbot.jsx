@@ -37,6 +37,13 @@ export default function ChatWidget() {
 
   const chatRef = useRef(null);
   const isClient = useClientOnly();
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(scrollToBottom, [messagesEndRef]); // Updated dependency
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -153,10 +160,13 @@ export default function ChatWidget() {
 
     setIsLoading(true);
     try {
+      const summaryUrl = `/summary/?code=${encodeURIComponent(
+        currentVideoUrl
+      )}&count=300`;
+
+      // Make the request to our proxy
       const response = await fetch(
-        `http://localhost:8000/summary/?code=${encodeURIComponent(
-          currentVideoUrl
-        )}&count=300`
+        `/api/proxy?url=${encodeURIComponent(summaryUrl)}`
       );
       const data = await response.json();
 
@@ -451,6 +461,7 @@ export default function ChatWidget() {
                           ))}
                         </AnimatePresence>
                       )}
+                      <div ref={messagesEndRef} />
                     </div>
                   </ScrollArea>
                   {!showUrlInput && (
